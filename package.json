@@ -1,0 +1,21 @@
+{
+  "name": "paaw-a2a-server",
+  "version": "1.0.0",
+  "description": "PAAW A2A Server — expose PAAW skills via Agent2Agent protocol",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "tsx src/server.ts"
+  },
+  "dependencies": {
+    "@a2a-js/sdk": "^0.3.13",
+    "express": "^4.21.0",
+    "uuid": "^10.0.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "@types/express": "^4.17.21",
+    "@types/uuid": "^10.0.0"
+  }
+}
