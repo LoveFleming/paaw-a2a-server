@@ -9,6 +9,7 @@
  *   5. Webhook — 接收遠端 Agent 的 push notification
  */
 
+import 'dotenv/config';
 import express from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { AgentCard, AGENT_CARD_PATH, Task, TaskStatusUpdateEvent, TaskArtifactUpdateEvent } from '@a2a-js/sdk';
@@ -51,7 +52,18 @@ const _thisDir = _dirname(_fileURLToPath(import.meta.url));
 let providerConfig: any = null;
 try {
   const fs = await import('fs');
-  const configPath = _resolve('/Users/steward/App/tAgent/data/config/providers.json');
+  // Try multiple relative paths to find PAAW's providers.json
+  const candidates = [
+    _resolve(_thisDir, '../../../tAgent/data/config/providers.json'),
+    _resolve(_thisDir, '../../tAgent/data/config/providers.json'),
+    _resolve(process.cwd(), '../tAgent/data/config/providers.json'),
+    _resolve(process.cwd(), 'data/config/providers.json'),
+  ];
+  const configPath = candidates.find(p => fs.existsSync(p));
+  if (configPath) {
+    const raw = fs.readFileSync(configPath, 'utf-8');
+    providerConfig = JSON.parse(raw);
+  }
   const raw = fs.readFileSync(configPath, 'utf-8');
   providerConfig = JSON.parse(raw);
 } catch {}
