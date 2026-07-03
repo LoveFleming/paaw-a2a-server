@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>A2A Demo Agent</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0d1117; color: #e6edf3; height: 100vh; display: flex; }
+
+  /* Left: Local chat | Right: Remote channel */
+  .panel { flex: 1; display: flex; flex-direction: column; border-right: 1px solid #21262d; }
+  .panel:last-child { border-right: none; }
+  .panel-header { padding: 12px 16px; border-bottom: 1px solid #21262d; display: flex; align-items: center; gap: 8px; }
+  .panel-header h2 { font-size: 14px; font-weight: 600; }
+  .panel-header .badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; }
+
+  /* Chat area */
+  .messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 8px; }
+  .msg { max-width: 80%; padding: 10px 14px; border-radius: 12px; font-size: 14px; line-height: 1.6; white-space: pre-wrap; }
+  .msg.user { align-self: flex-end; background: #1f6feb; color: #fff; border-bottom-right-radius: 4px; }
+  .msg.agent { align-self: flex-start; background: #161b22; border: 1px solid #30363d; border-bottom-left-radius: 4px; }
+  .msg.remote { align-self: flex-start; background: #1a1e2e; border: 1px solid #2d4a6f; border-bottom-left-radius: 4px; }
+  .msg.system { align-self: center; font-size: 12px; color: #8b949e; background: none; padding: 4px 0; }
+  .msg .meta { font-size: 11px; color: #8b949e; margin-top: 4px; }
+
+  /* Input */
+  .input-area { padding: 12px 16px; border-top: 1px solid #21262d; display: flex; gap: 8px; }
+  .input-area textarea { flex: 1; background: #0d1117; border: 1px solid #30363d; border-radius: 8px; padding: 10px 14px; color: #e6edf3; font-size: 14px; resize: none; outline: none; font-family: inherit; }
+  .input-area textarea:focus { border-color: #1f6feb; }
+  .input-area button { padding: 8px 20px; border-radius: 8px; border: none; cursor: pointer; font-size: 14px; font-weight: 600; }
+  .btn-send { background: #238636; color: #fff; }
+  .btn-send:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn-remote { background: #1f6feb; color: #fff; }
+  .btn-remote:disabled { opacity: 0.4; }
+
+  /* Status bar */
+  .status-bar { padding: 6px 16px; background: #010409; font-size: 12px; color: #8b949e; display: flex; gap: 16px; }
+  .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 4px; }
+  .dot-green { background: #238636; }
+  .dot-yellow { background: #d29922; }
+  .dot-red { background: #da3633; }
+
+  /* Tabs at top */
+  .top-bar { padding: 8px 16px; background: #010409; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #21262d; }
+  .top-bar h1 { font-size: 16px; }
+  .top-bar .tag { font-size: 11px; padding: 2px 8px; border-radius: 10px; background: #1f6feb; color: #fff; }
+</style>
+</head>
+<body>
+
+<div style="width: 100%; display: flex; flex-direction: column;">
+  <!-- Top bar -->
+  <div class="top-bar">
+    <h1>🔗 A2A Demo Agent</h1>
+    <span class="tag">A2A Protocol v0.3</span>
+    <span style="margin-left: auto; font-size: 12px; color: #8b949e;" id="connectionStatus">
+      <span class="status-dot dot-yellow" id="statusDot"></span>
+      <span id="statusText">Connecting...</span>
+    </span>
+  </div>
+
+  <!-- Two panels -->
+  <div style="flex: 1; display: flex; overflow: hidden;">
+    <!-- Left: Local Agent Chat -->
+    <div class="panel">
+      <div class="panel-header">
+        <h2>🤖 本地 Agent</h2>
+        <span class="badge" style="background: #238636; color: #fff;">A2A Server</span>
+      </div>
+      <div class="messages" id="localMessages">
+        <div class="msg system">👋 歡迎！你可以直接跟本地 Agent 聊天，或按「📡 找遠端 Agent」來啟動 A2A 協作</div>
+      </div>
+      <div class="input-area">
+        <textarea id="localInput" rows="2" placeholder="輸入訊息... (Enter 送出, Shift+Enter 換行)"></textarea>
+        <button class="btn-send" id="btnLocalSend" onclick="sendLocal()">送出</button>
+        <button class="btn-remote" id="btnRemote" onclick="sendWithRemote()">📡 找遠端 Agent</button>
+      </div>
+    </div>
+
+    <!-- Right: Remote Channel -->
+    <div class="panel">
+      <div class="panel-header">
+        <h2>🌐 遠端通道</h2>
+        <span class="badge" style="background: #1f6feb; color: #fff;">PAAW Agent</span>
+        <span style="margin-left: auto; font-size: 12px; color: #8b949e;" id="remoteUrl"></span>
+      </div>
+      <div class="messages" id="remoteMessages">
+        <div class="msg system">📡 A2A 聊天通道 — 按「📡 找遠端 Agent」啟動對話</div>
+      </div>
+      <div class="status-bar" id="remoteStatus">
+        <span><span class="status-dot dot-yellow" id="remoteDot"></span> <span id="remoteStatusText">等待連線</span></span>
+        <span id="remoteTaskCount">Tasks: 0</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const BASE = location.origin;
+const REMOTE = new URLSearchParams(location.search).get('remote') || 'http://localhost:4097';
+
+// State
+let localLoading = false;
+let activeContextId = null;
+let remoteTaskCount = 0;
+
+// ── Init ──
+async function init() {
+  try {
+    const res = await fetch(`${BASE}/health`);
+    const data = await res.json();
+    document.getElementById('statusDot').className = 'status-dot dot-green';
+    document.getElementById('statusText').textContent = `Connected — ${data.agent} ${data.version}`;
+    document.getElementById('remoteUrl').textContent = data.remoteAgent || REMOTE;
+  } catch {
+    document.getElementById('statusDot').className = 'status-dot dot-red';
+    document.getElementById('statusText').textContent = 'Disconnected';
+  }
+}
+
+// ── Add message to panel ──
+function addMsg(panelId, role, text, meta) {
+  const panel = document.getElementById(panelId);
+  const div = document.createElement('div');
+  div.className = `msg ${role}`;
+  div.textContent = text;
+  if (meta) {
+    const metaDiv = document.createElement('div');
+    metaDiv.className = 'meta';
+    metaDiv.textContent = meta;
+    div.appendChild(metaDiv);
+  }
+  panel.appendChild(div);
+  panel.scrollTop = panel.scrollHeight;
+}
+
+// ── Send to local agent via A2A JSON-RPC ──
+async function sendLocal() {
+  const input = document.getElementById('localInput');
+  const text = input.value.trim();
+  if (!text || localLoading) return;
+  input.value = '';
+  localLoading = true;
+  document.getElementById('btnLocalSend').disabled = true;
+  document.getElementById('btnRemote').disabled = true;
+
+  addMsg('localMessages', 'user', text);
+  addMsg('localMessages', 'system', '⏳ 思考中...');
+
+  try {
+    const res = await fetch(`${BASE}/a2a/jsonrpc`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'message/send',
+        params: {
+          message: {
+            kind: 'message',
+            role: 'user',
+            messageId: `msg-${Date.now()}`,
+            parts: [{ kind: 'text', text }],
+            ...(activeContextId ? { contextId: activeContextId } : {}),
+          },
+        },
+        id: `local-${Date.now()}`,
+      }),
+    });
+    const data = await res.json();
+
+    // Remove thinking indicator
+    const msgs = document.getElementById('localMessages');
+    const thinking = msgs.querySelector('.msg.system:last-of-type');
+    if (thinking?.textContent?.includes('思考中')) thinking.remove();
+
+    if (data.result) {
+      const task = data.result;
+      activeContextId = activeContextId || task.contextId || task.id;
+      const artifact = task.artifacts?.[0];
+      const responseText = artifact?.parts?.[0]?.text || '(no output)';
+      addMsg('localMessages', 'agent', responseText, `Task: ${task.id?.slice(0,16)}… · ${task.status?.state}`);
+    } else if (data.error) {
+      addMsg('localMessages', 'agent', `❌ ${data.error.message}`);
+    }
+  } catch (err) {
+    const msgs = document.getElementById('localMessages');
+    const thinking = msgs.querySelector('.msg.system:last-of-type');
+    if (thinking?.textContent?.includes('思考中')) thinking.remove();
+    addMsg('localMessages', 'agent', `❌ 連線失敗: ${err.message}`);
+  }
+
+  localLoading = false;
+  document.getElementById('btnLocalSend').disabled = false;
+  document.getElementById('btnRemote').disabled = false;
+}
+
+// ── Send with remote collaboration ──
+async function sendWithRemote() {
+  const input = document.getElementById('localInput');
+  const text = input.value.trim() || '跟遠端 Agent 討論 A2A 協議的好處';
+  input.value = '';
+  localLoading = true;
+  document.getElementById('btnLocalSend').disabled = true;
+  document.getElementById('btnRemote').disabled = true;
+
+  addMsg('localMessages', 'user', text);
+  addMsg('remoteMessages', 'system', '📡 正在與遠端 Agent 建立 A2A 通道...');
+  document.getElementById('remoteDot').className = 'status-dot dot-yellow';
+  document.getElementById('remoteStatusText').textContent = 'Connecting...';
+
+  try {
+    // Tell local agent to collaborate with remote
+    const res = await fetch(`${BASE}/a2a/jsonrpc`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'message/send',
+        params: {
+          message: {
+            kind: 'message',
+            role: 'user',
+            messageId: `msg-${Date.now()}`,
+            parts: [{ kind: 'text', text: `跟遠端 Agent ${text}` }],
+            ...(activeContextId ? { contextId: activeContextId } : {}),
+          },
+        },
+        id: `remote-${Date.now()}`,
+      }),
+    });
+    const data = await res.json();
+
+    document.getElementById('remoteDot').className = 'status-dot dot-green';
+    document.getElementById('remoteStatusText').textContent = 'Connected';
+
+    if (data.result) {
+      const task = data.result;
+      activeContextId = activeContextId || task.contextId || task.id;
+      remoteTaskCount++;
+      document.getElementById('remoteTaskCount').textContent = `Tasks: ${remoteTaskCount}`;
+
+      const artifact = task.artifacts?.[0];
+      const responseText = artifact?.parts?.[0]?.text || '(no output)';
+
+      // Show in remote panel
+      addMsg('remoteMessages', 'system', '✅ 遠端 Agent 已回應');
+      addMsg('remoteMessages', 'remote', responseText.slice(0, 500), `via A2A · ${task.status?.state}`);
+
+      // Show in local panel
+      addMsg('localMessages', 'agent', responseText, `📡 遠端協作 · Task: ${task.id?.slice(0,16)}…`);
+    } else if (data.error) {
+      addMsg('remoteMessages', 'system', `❌ ${data.error.message}`);
+      addMsg('localMessages', 'agent', `❌ 遠端協作失敗: ${data.error.message}`);
+      document.getElementById('remoteDot').className = 'status-dot dot-red';
+    }
+  } catch (err) {
+    addMsg('remoteMessages', 'system', `❌ 連線失敗: ${err.message}`);
+    addMsg('localMessages', 'agent', `❌ 連線失敗: ${err.message}`);
+    document.getElementById('remoteDot').className = 'status-dot dot-red';
+    document.getElementById('remoteStatusText').textContent = 'Failed';
+  }
+
+  localLoading = false;
+  document.getElementById('btnLocalSend').disabled = false;
+  document.getElementById('btnRemote').disabled = false;
+}
+
+// ── Keyboard ──
+document.getElementById('localInput').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendLocal();
+  }
+});
+
+// ── Poll channels for updates ──
+async function pollChannels() {
+  if (!activeContextId) return;
+  try {
+    const res = await fetch(`${BASE}/api/channels/${activeContextId}`);
+    if (res.ok) {
+      const data = await res.json();
+      if (data.data?.history?.length) {
+        // Could update remote panel here
+      }
+    }
+  } catch {}
+}
+setInterval(pollChannels, 10000);
+
+// ── Start ──
+init();
+</script>
+</body>
+</html>
